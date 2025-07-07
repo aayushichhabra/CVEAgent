@@ -558,51 +558,9 @@ def apply_automated_fix(result):
     else:
         st.warning("⚠️ Could not extract a clear version number from the fix recommendation. Please update manually.")
 
-def fetch_today_cves():
-    _, nvd_key = get_api_keys()
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-    headers = {
-        'Accept': 'application/json',
-        'User-Agent': 'CVE-Agent/1.0'
-    }
-    if nvd_key:
-        headers["apiKey"] = nvd_key
-
-    params = {
-        "pubStartDate": f"{today}T00:00:00.000Z",
-        "pubEndDate": f"{today}T23:59:59.999Z"
-    }
-
-    try:
-        response = requests.get(NVD_API_BASE_URL, params=params, headers=headers, timeout=30)
-        if response.status_code == 200:
-            data = response.json()
-            vulns = data.get("vulnerabilities", [])
-            if not vulns:
-                return "⚠️ No CVEs published today."
-
-            results = []
-            for vuln in vulns:
-                cve = vuln.get("cve", {})
-                cve_id = cve.get("id", "")
-                desc = next((d["value"] for d in cve.get("descriptions", []) if d["lang"] == "en"), "")
-                results.append(f"- **{cve_id}**: {desc[:120]}...")
-
-            return "🗓️ **Today's Published CVEs:**\n" + "\n".join(results[:10])
-        else:
-            return f"❌ Error fetching today's CVEs. Status: {response.status_code}"
-    except Exception as e:
-        return f"❌ Exception fetching today's CVEs: {str(e)}"
 
 
 def handle_natural_query(user_input):
-    user_input_lower = user_input.lower()
-
-    # Check for "top cves of today" intent
-    if "top" in user_input_lower and "cve" in user_input_lower and "today" in user_input_lower:
-        return fetch_today_cves()
-
-    # Else use Gemini
     import google.generativeai as genai
     import os
     from dotenv import load_dotenv
@@ -613,20 +571,31 @@ def handle_natural_query(user_input):
     model = genai.GenerativeModel("models/gemini-1.5-flash")
 
     prompt = f"""
-    You are an expert on CVE (Common Vulnerabilities and Exposures) and cybersecurity.
-    The user asked: "{user_input}"
+You are a cybersecurity expert specializing in CVEs (Common Vulnerabilities and Exposures) and threat intelligence.
 
-    - Answer ONLY if the query is related to CVEs, cybersecurity vulnerabilities, or known CVE trends.
-    - Do NOT respond to unrelated questions.
-    - Limit your response to 300 words.
-    - If the query is not related to CVEs, say: "Sorry, I can only help with queries related to cybersecurity vulnerabilities or CVE data."
-    """
+The user asked:
+
+"{user_input}"
+
+Your task:
+
+- Interpret the intent (e.g., "top CVEs today", "top CVEs this month", "top CVEs of 2023", "recent critical vulnerabilities", "most exploited vulnerabilities in Zoom", etc.)
+- Summarize the most relevant, up-to-date CVE data and trends. 
+- Include real CVE IDs if you know them (e.g., CVE-2023-23397), software names, brief descriptions, and CVSS scores if known.
+- Be concise (max 300 words) and structured in your answer.
+- If the question is vague, provide general guidance on how to stay informed about vulnerabilities.
+- Do NOT refuse to answer; always try.
+
+Always provide a helpful, accurate answer in clear markdown format.
+"""
 
     try:
-        response = model.generate_content(prompt)
-        return response.text
+        with st.spinner("🤖 Generating AI response..."):
+            response = model.generate_content(prompt)
+        return response.text.strip()
     except Exception as e:
         return f"❌ Error generating response from Gemini: {str(e)}"
+
 
 
 if __name__ == "__main__":
