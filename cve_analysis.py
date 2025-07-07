@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 import time
 from dotenv import load_dotenv
 import re
+from datetime import datetime
 
 # Load environment variables from .env file
 load_dotenv()
@@ -60,19 +61,20 @@ def get_api_keys():
             st.markdown("""
             **Option 1: Streamlit Secrets (Recommended)**
             
-            Create `.streamlit/secrets.toml` file:
-            ```toml
+            Create .streamlit/secrets.toml file:
+            
+toml
             GEMINI_API_KEY = "your_gemini_api_key_here"
             NVD_API_KEY = "your_nvd_api_key_here"  # optional
-            ```
+
             
             **Option 2: Environment Variables**
             
-            Create `.env` file:
-            ```
-            GEMINI_API_KEY=your_gemini_api_key_here
+            Create .env file:
+            
+GEMINI_API_KEY=your_gemini_api_key_here
             NVD_API_KEY=your_nvd_api_key_here
-            ```
+
             
             **Get API Keys:**
             - 🤖 [Google AI Studio](https://makersuite.google.com/app/apikey)
@@ -345,7 +347,7 @@ def main():
         # Add initial bot message
         st.session_state.chat_messages.append({
             "role": "assistant",
-            "content": "👋 Hello! I'm your CVE Analysis Agent. What CVE would you like me to analyze?\n\n**Example CVEs:** `CVE-2023-40088`, `CVE-2021-44228`, `CVE-2023-23397`, `CVE-2022-30190`\n\nJust type a CVE ID and I'll provide a comprehensive security analysis!"
+            "content": "👋 Hello! I'm your CVE Analysis Agent. What CVE would you like me to analyze?\n\n**Example CVEs:** CVE-2023-40088, CVE-2021-44228, CVE-2023-23397, CVE-2022-30190\n\nJust type a CVE ID and I'll provide a comprehensive security analysis!"
         })
 
     # Sidebar configuration
@@ -357,7 +359,7 @@ def main():
             st.session_state.chat_messages = []
             st.session_state.chat_messages.append({
                 "role": "assistant", 
-                "content": "👋 Hello! I'm your CVE Analysis Agent. What CVE would you like me to analyze?\n\n**Example CVEs:** `CVE-2023-40088`, `CVE-2021-44228`, `CVE-2023-23397`, `CVE-2022-30190`\n\nJust type a CVE ID and I'll provide a comprehensive security analysis!"
+                "content": "👋 Hello! I'm your CVE Analysis Agent. What CVE would you like me to analyze?\n\n**Example CVEs:** CVE-2023-40088, CVE-2021-44228, CVE-2023-23397, CVE-2022-30190\n\nJust type a CVE ID and I'll provide a comprehensive security analysis!"
             })
             st.rerun()
 
@@ -391,15 +393,18 @@ def main():
 
         # Validate CVE format
         cve_id = user_input.strip().upper()
-        if not cve_id.startswith('CVE-'):
+        if not re.match(r"^CVE-\d{4}-\d{4,}$", cve_id, re.IGNORECASE):
             with st.chat_message("assistant"):
-                st.error("❌ Please enter a valid CVE ID in the format: CVE-YYYY-NNNN")
-            st.session_state.chat_messages.append({
-                "role": "assistant",
-                "content": "❌ Please enter a valid CVE ID in the format: CVE-YYYY-NNNN\n\n**Example:** `CVE-2023-40088`"
-            })
+                with st.spinner("🤖 Asking Gemini..."):
+                    ai_reply = handle_natural_query(user_input)
+                    st.markdown(ai_reply)
+                    st.session_state.chat_messages.append({
+                        "role": "assistant",
+                        "content": ai_reply
+                    })
             st.rerun()
             return
+
 
         # Check API key requirement
         if not gemini_key:
@@ -452,7 +457,7 @@ def main():
                         # Add follow-up message
                         st.session_state.chat_messages.append({
                             "role": "assistant",
-                            "content": "🔍 **Want to analyze another CVE?** Just enter another CVE ID below!\n\n**Quick examples:** `CVE-2021-44228` (Log4j), `CVE-2023-23397` (Outlook), `CVE-2022-30190` (Follina)"
+                            "content": "🔍 **Want to analyze another CVE?** Just enter another CVE ID below!\n\n**Quick examples:** CVE-2021-44228 (Log4j), CVE-2023-23397 (Outlook), CVE-2022-30190 (Follina)"
                         })
 
                 except Exception as e:
@@ -552,6 +557,76 @@ def apply_automated_fix(result):
         )
     else:
         st.warning("⚠️ Could not extract a clear version number from the fix recommendation. Please update manually.")
+
+def fetch_today_cves():
+    _, nvd_key = get_api_keys()
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    headers = {
+        'Accept': 'application/json',
+        'User-Agent': 'CVE-Agent/1.0'
+    }
+    if nvd_key:
+        headers["apiKey"] = nvd_key
+
+    params = {
+        "pubStartDate": f"{today}T00:00:00.000Z",
+        "pubEndDate": f"{today}T23:59:59.999Z"
+    }
+
+    try:
+        response = requests.get(NVD_API_BASE_URL, params=params, headers=headers, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            vulns = data.get("vulnerabilities", [])
+            if not vulns:
+                return "⚠️ No CVEs published today."
+
+            results = []
+            for vuln in vulns:
+                cve = vuln.get("cve", {})
+                cve_id = cve.get("id", "")
+                desc = next((d["value"] for d in cve.get("descriptions", []) if d["lang"] == "en"), "")
+                results.append(f"- **{cve_id}**: {desc[:120]}...")
+
+            return "🗓️ **Today's Published CVEs:**\n" + "\n".join(results[:10])
+        else:
+            return f"❌ Error fetching today's CVEs. Status: {response.status_code}"
+    except Exception as e:
+        return f"❌ Exception fetching today's CVEs: {str(e)}"
+
+
+def handle_natural_query(user_input):
+    user_input_lower = user_input.lower()
+
+    # Check for "top cves of today" intent
+    if "top" in user_input_lower and "cve" in user_input_lower and "today" in user_input_lower:
+        return fetch_today_cves()
+
+    # Else use Gemini
+    import google.generativeai as genai
+    import os
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+
+    model = genai.GenerativeModel("models/gemini-1.5-flash")
+
+    prompt = f"""
+    You are an expert on CVE (Common Vulnerabilities and Exposures) and cybersecurity.
+    The user asked: "{user_input}"
+
+    - Answer ONLY if the query is related to CVEs, cybersecurity vulnerabilities, or known CVE trends.
+    - Do NOT respond to unrelated questions.
+    - Limit your response to 300 words.
+    - If the query is not related to CVEs, say: "Sorry, I can only help with queries related to cybersecurity vulnerabilities or CVE data."
+    """
+
+    try:
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"❌ Error generating response from Gemini: {str(e)}"
 
 
 if __name__ == "__main__":
