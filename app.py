@@ -14,7 +14,7 @@ st.title("🛡️ CVE Agent")
 if "active_tab" not in st.session_state:
     st.session_state.active_tab = "CVE Analysis"
 
-# Display tab selector
+# Display tab selector as buttons
 col1, col2 = st.columns(2)
 with col1:
     if st.button("🔍 CVE Analysis"):
@@ -23,10 +23,8 @@ with col2:
     if st.button("🛠️ Dependency Scanner"):
         st.session_state.active_tab = "Dependency Scanner"
 
-# Route to the correct page
+# Show selected tab content
 if st.session_state.active_tab == "CVE Analysis":
-    st.query_params = {"tab": "cve"}
     cve_analysis.main()
 elif st.session_state.active_tab == "Dependency Scanner":
-    st.query_params = {"tab": "scanner"}
     scanner.main()
