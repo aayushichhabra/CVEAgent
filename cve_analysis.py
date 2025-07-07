@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 import time
 from dotenv import load_dotenv
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Load environment variables from .env file
 load_dotenv()
@@ -559,43 +559,85 @@ def apply_automated_fix(result):
         st.warning("⚠️ Could not extract a clear version number from the fix recommendation. Please update manually.")
 
 
+def fetch_nvd_cves(start_date, end_date):
+    _, nvd_key = get_api_keys()
+    headers = {
+        'Accept': 'application/json',
+        'User-Agent': 'CVE-Agent/1.0'
+    }
+    if nvd_key:
+        headers["apiKey"] = nvd_key
 
-def handle_natural_query(user_input):
-    import google.generativeai as genai
-    import os
-    from dotenv import load_dotenv
-
-    load_dotenv()
-    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-
-    model = genai.GenerativeModel("models/gemini-1.5-flash")
-
-    prompt = f"""
-You are a cybersecurity expert specializing in CVEs (Common Vulnerabilities and Exposures) and threat intelligence.
-
-The user asked:
-
-"{user_input}"
-
-Your task:
-
-- Interpret the intent (e.g., "top CVEs today", "top CVEs this month", "top CVEs of 2023", "recent critical vulnerabilities", "most exploited vulnerabilities in Zoom", etc.)
-- Summarize the most relevant, up-to-date CVE data and trends. 
-- Include real CVE IDs if you know them (e.g., CVE-2023-23397), software names, brief descriptions, and CVSS scores if known.
-- Be concise (max 300 words) and structured in your answer.
-- If the question is vague, provide general guidance on how to stay informed about vulnerabilities.
-- Do NOT refuse to answer; always try.
-
-Always provide a helpful, accurate answer in clear markdown format.
-"""
+    params = {
+        "pubStartDate": f"{start_date}T00:00:00.000Z",
+        "pubEndDate": f"{end_date}T23:59:59.999Z"
+    }
 
     try:
-        with st.spinner("🤖 Generating AI response..."):
-            response = model.generate_content(prompt)
-        return response.text.strip()
+        response = requests.get(NVD_API_BASE_URL, params=params, headers=headers, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            vulns = data.get("vulnerabilities", [])
+            if not vulns:
+                return "⚠️ No CVEs found in that period."
+
+            results = []
+            for vuln in vulns[:10]:
+                cve = vuln.get("cve", {})
+                cve_id = cve.get("id", "")
+                desc = next((d["value"] for d in cve.get("descriptions", []) if d["lang"] == "en"), "")
+                results.append(f"- **{cve_id}**: {desc[:120]}...")
+
+            return "🗓️ **CVEs Published in Period:**\n" + "\n".join(results)
+        else:
+            return f"❌ Error fetching CVEs. Status: {response.status_code}"
+    except Exception as e:
+        return f"❌ Exception fetching CVEs: {str(e)}"
+
+def handle_natural_query(user_input):
+    user_input_lower = user_input.lower()
+    today = datetime.utcnow()
+
+    # Today
+    if "today" in user_input_lower:
+        start = today.strftime("%Y-%m-%d")
+        end = start
+        return fetch_nvd_cves(start, end)
+
+    # This month
+    if "this month" in user_input_lower:
+        start = today.replace(day=1).strftime("%Y-%m-%d")
+        end = today.strftime("%Y-%m-%d")
+        return fetch_nvd_cves(start, end)
+
+    # This year
+    if "this year" in user_input_lower:
+        start = today.replace(month=1, day=1).strftime("%Y-%m-%d")
+        end = today.strftime("%Y-%m-%d")
+        return fetch_nvd_cves(start, end)
+
+    # Specific year like "2023"
+    match = re.search(r"(20\d{2})", user_input_lower)
+    if match:
+        year = int(match.group(1))
+        start = f"{year}-01-01"
+        end = f"{year}-12-31"
+        return fetch_nvd_cves(start, end)
+
+    # Fallback to Gemini
+    try:
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+        model = genai.GenerativeModel("models/gemini-1.5-flash")
+        prompt = f"""
+        You are an expert on CVE (Common Vulnerabilities and Exposures) and cybersecurity.
+        The user asked: "{user_input}"
+        Answer ONLY if the query is related to CVEs, cybersecurity vulnerabilities, or known CVE trends.
+        Limit your response to 300 words.
+        """
+        response = model.generate_content(prompt)
+        return response.text
     except Exception as e:
         return f"❌ Error generating response from Gemini: {str(e)}"
-
 
 
 if __name__ == "__main__":
