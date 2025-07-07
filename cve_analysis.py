@@ -15,6 +15,10 @@ from datetime import datetime, timedelta
 load_dotenv()
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
+def to_nvd_iso8601(dt: datetime) -> str:
+    """Convert datetime to ISO 8601 format with milliseconds and Z for NVD API."""
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
 # NIST NVD API Configuration
 NVD_API_BASE_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
@@ -559,8 +563,9 @@ def apply_automated_fix(result):
         st.warning("⚠️ Could not extract a clear version number from the fix recommendation. Please update manually.")
 
 
-def fetch_nvd_cves(start_date, end_date):
+def fetch_nvd_cves(start_date: datetime, end_date: datetime) -> str:
     _, nvd_key = get_api_keys()
+
     headers = {
         'Accept': 'application/json',
         'User-Agent': 'CVE-Agent/1.0'
@@ -569,12 +574,14 @@ def fetch_nvd_cves(start_date, end_date):
         headers["apiKey"] = nvd_key
 
     params = {
-        "pubStartDate": f"{start_date}T00:00:00.000Z",
-        "pubEndDate": f"{end_date}T23:59:59.999Z"
+        "pubStartDate": to_nvd_iso8601(start_date),
+        "pubEndDate": to_nvd_iso8601(end_date)
     }
 
     try:
-        response = requests.get(NVD_API_BASE_URL, params=params, headers=headers, timeout=30)
+        with st.spinner("🔍 Fetching CVEs from NVD..."):
+            response = requests.get(NVD_API_BASE_URL, params=params, headers=headers, timeout=30)
+        
         if response.status_code == 200:
             data = response.json()
             vulns = data.get("vulnerabilities", [])
@@ -590,38 +597,36 @@ def fetch_nvd_cves(start_date, end_date):
 
             return "🗓️ **CVEs Published in Period:**\n" + "\n".join(results)
         else:
-            return f"❌ Error fetching CVEs. Status: {response.status_code}"
+            return f"❌ Error fetching CVEs. Status: {response.status_code}\nDetails: {response.text}"
     except Exception as e:
         return f"❌ Exception fetching CVEs: {str(e)}"
+
 
 def handle_natural_query(user_input):
     user_input_lower = user_input.lower()
     today = datetime.utcnow()
 
-    # Today
     if "today" in user_input_lower:
-        start = today.strftime("%Y-%m-%d")
-        end = start
+        start = today.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = today.replace(hour=23, minute=59, second=59, microsecond=999000)
         return fetch_nvd_cves(start, end)
 
-    # This month
     if "this month" in user_input_lower:
-        start = today.replace(day=1).strftime("%Y-%m-%d")
-        end = today.strftime("%Y-%m-%d")
+        start = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = today.replace(hour=23, minute=59, second=59, microsecond=999000)
         return fetch_nvd_cves(start, end)
 
-    # This year
     if "this year" in user_input_lower:
-        start = today.replace(month=1, day=1).strftime("%Y-%m-%d")
-        end = today.strftime("%Y-%m-%d")
+        start = today.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = today.replace(hour=23, minute=59, second=59, microsecond=999000)
         return fetch_nvd_cves(start, end)
 
     # Specific year like "2023"
     match = re.search(r"(20\d{2})", user_input_lower)
     if match:
         year = int(match.group(1))
-        start = f"{year}-01-01"
-        end = f"{year}-12-31"
+        start = datetime(year, 1, 1, 0, 0, 0, 0)
+        end = datetime(year, 12, 31, 23, 59, 59, 999000)
         return fetch_nvd_cves(start, end)
 
     # Fallback to Gemini
@@ -638,6 +643,7 @@ def handle_natural_query(user_input):
         return response.text
     except Exception as e:
         return f"❌ Error generating response from Gemini: {str(e)}"
+
 
 
 if __name__ == "__main__":
