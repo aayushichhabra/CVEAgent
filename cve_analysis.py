@@ -564,7 +564,7 @@ def handle_natural_query(user_input):
     load_dotenv()
     genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-    model = genai.GenerativeModel("model_name="models/gemini-1.5-flash")
+    model = genai.GenerativeModel(model_name="models/gemini-1.5-flash")
 
     prompt = f"""
     You are an expert on CVE (Common Vulnerabilities and Exposures) and cybersecurity.
