@@ -19,6 +19,14 @@ def to_nvd_iso8601(dt: datetime) -> str:
     """Convert datetime to ISO 8601 format with milliseconds and Z for NVD API."""
     return dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
+MONTH_NAME_TO_NUMBER = {
+    "january": 1, "february": 2, "march": 3,
+    "april": 4, "may": 5, "june": 6,
+    "july": 7, "august": 8, "september": 9,
+    "october": 10, "november": 11, "december": 12
+}
+
+
 # NIST NVD API Configuration
 NVD_API_BASE_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
@@ -602,30 +610,56 @@ def fetch_nvd_cves(start_date: datetime, end_date: datetime) -> str:
         return f"❌ Exception fetching CVEs: {str(e)}"
 
 
+
 def handle_natural_query(user_input):
     user_input_lower = user_input.lower()
     today = datetime.utcnow()
 
+    # Handle: "today"
     if "today" in user_input_lower:
         start = today.replace(hour=0, minute=0, second=0, microsecond=0)
         end = today.replace(hour=23, minute=59, second=59, microsecond=999000)
         return fetch_nvd_cves(start, end)
 
+    # Handle: "this month"
     if "this month" in user_input_lower:
         start = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        end = today.replace(hour=23, minute=59, second=59, microsecond=999000)
+        end = today
         return fetch_nvd_cves(start, end)
 
+    # Handle: "last month"
+    if "last month" in user_input_lower:
+        first_of_this_month = today.replace(day=1)
+        last_month_end = first_of_this_month - timedelta(days=1)
+        last_month_start = last_month_end.replace(day=1)
+        return fetch_nvd_cves(last_month_start, last_month_end)
+
+    # Handle: "this year"
     if "this year" in user_input_lower:
         start = today.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-        end = today.replace(hour=23, minute=59, second=59, microsecond=999000)
+        end = today
         return fetch_nvd_cves(start, end)
 
-    # Specific year like "2023"
+    # Handle: "June 2024", "May 2023", etc.
+    for month_name in MONTH_NAME_TO_NUMBER:
+        if month_name in user_input_lower:
+            match = re.search(rf"{month_name}\s+(\d{{4}})", user_input_lower)
+            if match:
+                year = int(match.group(1))
+                month = MONTH_NAME_TO_NUMBER[month_name]
+                start = datetime(year, month, 1)
+                # Determine end of month
+                if month == 12:
+                    end = datetime(year + 1, 1, 1) - timedelta(seconds=1)
+                else:
+                    end = datetime(year, month + 1, 1) - timedelta(seconds=1)
+                return fetch_nvd_cves(start, end)
+
+    # Handle: specific year like "2023"
     match = re.search(r"(20\d{2})", user_input_lower)
     if match:
         year = int(match.group(1))
-        start = datetime(year, 1, 1, 0, 0, 0, 0)
+        start = datetime(year, 1, 1)
         end = datetime(year, 12, 31, 23, 59, 59, 999000)
         return fetch_nvd_cves(start, end)
 
@@ -643,6 +677,7 @@ def handle_natural_query(user_input):
         return response.text
     except Exception as e:
         return f"❌ Error generating response from Gemini: {str(e)}"
+
 
 
 
