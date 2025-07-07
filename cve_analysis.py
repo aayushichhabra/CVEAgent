@@ -391,18 +391,15 @@ def main():
 
         # Validate CVE format
         cve_id = user_input.strip().upper()
-        if not re.match(r"^CVE-\d{4}-\d{4,}$", cve_id, re.IGNORECASE):
+        if not cve_id.startswith('CVE-'):
             with st.chat_message("assistant"):
-                with st.spinner("🤖 Asking Gemini..."):
-                    ai_reply = handle_natural_query(user_input)
-                    st.markdown(ai_reply)
-                    st.session_state.chat_messages.append({
-                        "role": "assistant",
-                        "content": ai_reply
-                    })
+                st.error("❌ Please enter a valid CVE ID in the format: CVE-YYYY-NNNN")
+            st.session_state.chat_messages.append({
+                "role": "assistant",
+                "content": "❌ Please enter a valid CVE ID in the format: CVE-YYYY-NNNN\n\n**Example:** `CVE-2023-40088`"
+            })
             st.rerun()
             return
-
 
         # Check API key requirement
         if not gemini_key:
@@ -556,31 +553,6 @@ def apply_automated_fix(result):
     else:
         st.warning("⚠️ Could not extract a clear version number from the fix recommendation. Please update manually.")
 
-def handle_natural_query(user_input):
-    import google.generativeai as genai
-    import os
-    from dotenv import load_dotenv
-
-    load_dotenv()
-    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-
-    model = genai.GenerativeModel(model_name="models/gemini-1.5-flash")
-
-    prompt = f"""
-    You are an expert on CVE (Common Vulnerabilities and Exposures) and cybersecurity.
-    The user asked: "{user_input}"
-
-    - Answer ONLY if the query is related to CVEs, cybersecurity vulnerabilities, or known CVE trends.
-    - Do NOT respond to unrelated questions.
-    - Limit your response to 300 words.
-    - If the query is not related to CVEs, say: "Sorry, I can only help with queries related to cybersecurity vulnerabilities or CVE data."
-    """
-
-    try:
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"❌ Error generating response from Gemini: {str(e)}"
 
 if __name__ == "__main__":
     main()
